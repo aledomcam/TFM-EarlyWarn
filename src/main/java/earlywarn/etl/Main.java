@@ -48,8 +48,6 @@ public class Main {
 		añadir.añadirGastoTurístico(rutaFicheroGasto);
 		añadir.añadirTuristasVuelo(mismaFechaTurismo, aproximarFaltantesTurismo);
 		añadir.añadirIngresosVuelo(mismaFechaTurismo, aproximarFaltantesTurismo);
-		añadir.añadirRelaciónProvinciaEstadoPaís();
-		añadir.añadirReportesPaís();
 
 		modificar.convertirFechasReportes();
 

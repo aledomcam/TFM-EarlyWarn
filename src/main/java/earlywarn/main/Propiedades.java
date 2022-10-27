@@ -28,8 +28,7 @@ public class Propiedades {
 	 */
 	public boolean inicializadas() {
 		try (Transaction tx = db.beginTx()) {
-			try (Result res = tx.execute(
-				"MATCH (p:Properties) RETURN p")) {
+			try (Result res = tx.execute("MATCH (p:Properties) RETURN p")) {
 				return res.hasNext();
 			}
 		}

@@ -2,9 +2,6 @@ package earlywarn.main;
 
 import earlywarn.definiciones.*;
 import earlywarn.etl.Modificar;
-import earlywarn.main.modelo.SIR;
-import earlywarn.main.modelo.SIRAeropuerto;
-import earlywarn.main.modelo.SIRVuelo;
 import org.neo4j.graphdb.GraphDatabaseService;
 import org.neo4j.graphdb.Result;
 import org.neo4j.graphdb.Transaction;
@@ -154,7 +151,6 @@ public class Consultas {
 	/**
 	 * Dado una fecha de inicio, una fecha de fin y un país devuelve el valor de riesgo importado para el país.
 	 * Requiere que se hayan ejecutado ciertas operaciones ETL.
-	 * Ejemplo: earlywarn.main.SIR_por_pais(date("2019-06-01"), date({year: 2019, month: 7, day: 1}), "Spain")
 	 * @param idPaís Identificador del país tal y como aparece en la base de datos
 	 * @param díaInicio Primer día a tener en cuenta
 	 * @param díaFin Último día a tener en cuenta
@@ -162,7 +158,6 @@ public class Consultas {
 	 * en el periodo especificado.
 	 */
 	public Double getRiesgoPorPaís(LocalDate díaInicio, LocalDate díaFin, String idPaís) {
-		// Las formas de escribir las fechas en neo4j son como entrada: date("2019-06-01") y date({year: 2019, month: 7}
 		String diaInicioStr = díaInicio.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
 		String diaFinStr = díaFin.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
 		Propiedades propiedades = new Propiedades(db);
@@ -534,180 +529,5 @@ public class Consultas {
 		}
 
 		return ret;
-	}
-
-	/**
-	 * Devuelve los valores del SIR (susceptibles, infectados y recuperados) iniciales de un vuelo.
-	 * Requiere que se hayan ejecutado ciertas operaciones ETL.
-	 * @param idVuelo Identificador del vuelo del que se desea calcular el SIR.
-	 * @return Clase con los valores referentes a los Susceptibles, Infectados y Recuperados (SIR) al inicio del vuelo.
-	 */
-	public SIR getSIRInicialPorVuelo(Number idVuelo) {
-		SIR ret = null;
-		Propiedades propiedades = new Propiedades(db);
-
-		if (propiedades.getBool(Propiedad.ETL_CONVERTIR_FECHAS_REPORTES)) {
-			try (Transaction tx = db.beginTx()) {
-				/*
-				 * Nota: Esta consulta tarda 300ms en ejecutarse para un solo vuelo. Si en el futuro se quiere
-				 * calcular el SIR de todos los vuelos de la BD o ir calcuándolo para cada vuelo según se necesita
-				 * acceder al valor, probablemente haya que optimizar esto aún más.
-				 */
-				try (Result res = tx.execute(
-					"MATCH(f:FLIGHT{flightId:" + idVuelo + "})" +
-					"WITH f, f.dateOfDeparture AS dateOfDeparture " +
-					"MATCH(f)<-[]-(aod:AirportOperationDay)-[]-(a:Airport)-[:INFLUENCE_ZONE]-(iz)-[]-(r:Report) " +
-					"WHERE r.releaseDate = dateOfDeparture " +
-					"AND (" +
-						"iz.countryName IS NOT null AND r.country=iz.countryName OR " +
-						"iz.regionName IS NOT null AND r.region=iz.regionName OR " +
-						"iz.proviceStateName IS NOT null AND r.provinceState=iz.proviceStateName " +
-					")" +
-					"RETURN f.occupancyPercentage, f.seatsCapacity, iz.population, r.confirmed, r.deaths, r.recovered"
-				)) {
-					List<String> columnas = res.columns();
-					while (res.hasNext()) {
-						Map<String, Object> row = res.next();
-						double occupancyPercentage = Utils.resultadoADouble(row.get(columnas.get(0)));
-						long seatsCapacity = (Long) row.get(columnas.get(1));
-						long population = (Long) row.get(columnas.get(2));
-						long confirmed = (Long) row.get(columnas.get(3));
-						long deaths = (Long) row.get(columnas.get(4));
-						long recovered = (Long) row.get(columnas.get(5)) + deaths;
-
-						//Cálculo del SIR
-						ret = CalculoSIR.calcularSirInicialVuelo(occupancyPercentage, seatsCapacity, population, confirmed,
-							recovered);
-					}
-				}
-			}
-		} else {
-			throw new ETLOperationRequiredException("No se ha ejecutado una operación ETL requerida para realizar " +
-				"este cálculo.");
-		}
-		return ret;
-	}
-
-	/**
-	 * Calcula y añade al vuelo con identificador "idVuelo" los valores referentes al SIR (Susceptibles,
-	 * Infectados, Recuperados) al inicio y al final del vuelo.
-	 * @param idVuelo Hace referencia al identificador del vuelo del que calcular el SIR.
-	 * @param sirVuelo Valor de riesgo calculado para el vuelo.
-	 */
-	public void añadirRiesgoVuelo(Long idVuelo, SIRVuelo sirVuelo){
-		String consulta = "MATCH(f:FLIGHT{flightId:" + idVuelo + "}) SET f.flightS0 = " + sirVuelo.sInicial +
-			", f.flightI0 = " + sirVuelo.iInicial + ", f.flightR0 = " + sirVuelo.rInicial + ", f.flightSfinal = " +
-			sirVuelo.sFinal + ", f.flightIfinal = " + sirVuelo.iFinal + ", f.flightRfinal = " + sirVuelo.rFinal +
-			", f.alphaValue = " + sirVuelo.alpha + ", f.betaValue = " + sirVuelo.beta;
-
-		try(Transaction tx = db.beginTx()) {
-			// Query para guardar los valores SIR del vuelo calculados en la base de datos
-			tx.execute(consulta);
-			tx.commit();
-		}
-	}
-
-	/**
-	 * Devuelve una lista con los cálculos del SIR finales de un vuelo, siendo estos los Susceptibles, Infectados y Recuperados,
-	 * en este mismo orden, haciendo el número de infectados referencia al RIESGO del vuelo, usando los valores de índice
-	 * de transmisión y recuperación especificados.
-	 * Requiere que se hayan ejecutado ciertas operaciones ETL.
-	 * @param idVuelo Identificador del vuelo del que se desea calcular el SIR final.
-	 * @param alphaValue Valor referente al índice de recuperación del virus, alpha.
-	 * @param betaValue Valor referente al índice de transmisión del virus, beta.
-	 * @return Clase que contiene todos los valores usados para el cálculo SIR y el riesgo final del vuelo.
-	 * @throws IllegalOperationException si el vuelo no existe.
-	 */
-	public SIRVuelo getRiesgoVuelo(Number idVuelo, Number alphaValue, Number betaValue, Boolean saveResult){
-		double alpha = (Double) alphaValue;
-		double beta = (Double) betaValue;
-		Propiedades propiedades = new Propiedades(db);
-		SIRVuelo ret;
-		SIR initial = getSIRInicialPorVuelo(idVuelo);
-
-		if (propiedades.getBool(Propiedad.ETL_CONVERTIR_FECHAS_VUELOS)) {
-			try (Transaction tx = db.beginTx()) {
-				try (Result res = tx.execute(
-					"MATCH(f:FLIGHT{flightId:" + idVuelo + "}) RETURN duration.between(f.instantOfDeparture," +
-						"f.instantOfArrival).seconds, f.occupancyPercentage, f.seatsCapacity"
-				)) {
-					if (res.hasNext()) {
-						List<String> columnas = res.columns();
-						Map<String, Object> row = res.next();
-						double durationInSeconds = (Long) row.get(columnas.get(0));
-						double occupancyPercentage = (Double) row.get(columnas.get(1));
-						double seatsCapacity = (Long) row.get(columnas.get(2));
-
-						// Llamada a función para calcular el SIR
-						ret = CalculoSIR.calcularRiesgoVuelo(initial, durationInSeconds, seatsCapacity,
-							occupancyPercentage, alpha, beta);
-					} else {
-						throw new IllegalOperationException("El vuelo con identificador " + idVuelo + " no existe");
-					}
-				}
-			}
-			if (saveResult) {
-				añadirRiesgoVuelo((Long) idVuelo, ret);
-			}
-		} else {
-			throw new ETLOperationRequiredException("No se ha ejecutado una operación ETL requerida para realizar " +
-				"este cálculo.");
-		}
-		return ret;
-	}
-
-	/**
-	 * Devuelve el valor del riesgo acumulado del aeropuerto con el identificador "idAeropuerto" en la fecha indicada.
-	 * Requiere que se hayan ejecutado ciertas operaciones ETL.
-	 * @param idAeropuerto Identificador del aeropuerto del que se desea obtener el riesgo.
-	 * @param fecha Fecha del día del que recuperar el riesgo.
-	 * @return Clase con el riesgo de todos los vuelos y el riesgo total del aeropuerto en el dia marcado.
-	 */
-	public SIRAeropuerto getRiesgoAeropuerto(String idAeropuerto, LocalDate fecha, Boolean saveResult){
-		String fechaStr = fecha.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
-		Propiedades propiedades = new Propiedades(db);
-		SIRAeropuerto ret = new SIRAeropuerto();
-		double accumulatedRisk = 0;
-		List<Long> idVuelos = new ArrayList<>();
-
-		if(propiedades.getBool(Propiedad.ETL_CONVERTIR_FECHAS_VUELOS)){
-			try(Transaction tx = db.beginTx()) {
-				try(Result res = tx.execute("MATCH (a:Airport{airportId:\"" + idAeropuerto + "\"})-[]->(aod:AirportOperationDay)" +
-						"<-[]-(f:FLIGHT) WHERE f.dateOfDeparture=date(\"" + fechaStr + "\") RETURN f.flightId")){
-					List<String> columnas = res.columns();
-					if(res.hasNext()){
-						while (res.hasNext()) {
-							idVuelos.add((Long) res.next().get(columnas.get(0)));
-						}
-					} else {
-						throw new IllegalOperationException("El aeropuerto con identificador " + idAeropuerto + " no existe");
-					}
-				}
-				for(Long idVuelo : idVuelos){
-					try(Result r = tx.execute("MATCH (f:FLIGHT{flightId:" + idVuelo + "}) RETURN f.flightSinicial, f.flightIinicial, " +
-							"f.flightRinicial, f.flightSfinal, f.flightIfinal, f.flightRfinal, f.alphaValue, f.betaValue")) {
-						if (r.hasNext()) {
-							// SIR already calculated
-							List<String> columnas = r.columns();
-							Map<String, Object> row = r.next();
-							ret.añadirRiesgoVuelo(Long.toString(idVuelo), (Double) row.get(columnas.get(4)));
-							accumulatedRisk += (Double) row.get(columnas.get(4));
-							if (saveResult) {
-								tx.execute("MATCH (a:Airport{airportId:\"" + idAeropuerto + "\"})-[]->(aod:AirportOperationDay{key:\"" +
-										idAeropuerto + "@" + fechaStr + "\"}) SET aod.totalImportedRisk = " + accumulatedRisk);
-							}
-						} else {
-							throw new IllegalOperationException("El vuelo con identificador " + idVuelo + " no existe");
-						}
-					}
-				}
-				tx.commit();
-			}
-			ret.setRiesgoTotal(accumulatedRisk);
-			return ret;
-		} else {
-			throw new ETLOperationRequiredException("No se ha ejecutado una operación ETL requerida para realizar " +
-				"este cálculo.");
-		}
 	}
 }
