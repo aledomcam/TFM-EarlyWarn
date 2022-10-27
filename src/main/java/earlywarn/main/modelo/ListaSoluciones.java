@@ -13,10 +13,10 @@ import java.util.List;
  */
 public class ListaSoluciones implements Iterable<List<String>> {
 	/*
-	 * Lista que almacena todas las soluciones en la lista. Cada una está representada por una lista con los IDs de
+	 * Almacena todas las soluciones en la lista de soluciones. Cada una está representada por una lista con los IDs de
 	 * las líneas cerradas en la solución.
 	 */
-	public List<List<String>> soluciones;
+	public final List<List<String>> soluciones;
 
 	/**
 	 * Crea una nueva instancia de la clase en base a los datos especificados en un fichero

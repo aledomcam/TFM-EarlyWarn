@@ -18,7 +18,7 @@ public class Modificar {
 
 	/**
 	 * Requerido por Neo4J
-	 * @deprecated Este constructor no debe utilizarse. Usar {@link Modificar#Modificar(GraphDatabaseService)} en su lugar.
+	 * @deprecated Este constructor no debe utilizarse. Usar {@link #Modificar(GraphDatabaseService)} en su lugar.
 	 */
 	@Deprecated
 	public Modificar() {
