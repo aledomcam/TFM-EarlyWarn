@@ -10,3 +10,7 @@ El proyecto es un plugin para Neo4J desarrollado en Java y se organiza de la sig
 - funciones: Contiene funciones pueden ser llamadas desde Neo4J.
 - main: Clases generales que se vayan a usar en el código de diferentes personas.
 - mh/vnsrs: Clases que implementan la metaheurística desarrollada por mí como parte del TFM.
+
+## Véase también
+- [Herramienta para obtención de pesos de un decisor](https://github.com/aledomcam/TFM-HerramientaPesos)
+- [Scripts para procesado de datos usados en el trabajo](https://github.com/aledomcam/TFM-Scripts)
